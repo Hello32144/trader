@@ -1,4 +1,19 @@
-(Get-Command python3.13).Path
+import os
+from transformers import BertTokenizer, BertForSequenceClassification, pipeline
+import datetime
+import numpy as np
+import pandas as pd
+import math
+import json
+from massive import RESTClient
+import requests
+import time
+from massive.rest.models import (
+    TickerNews,
+)
+import pandas_ta as ta
+
+import yfinance as yf
 price_cache = {}
 
 def get_price_data(stock):
