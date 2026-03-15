@@ -1,16 +1,17 @@
 import os
-from transformers import pipeline
+from transformers import BertTokenizer, BertForSequenceClassification, pipeline
 import datetime
 import numpy as np
 import pandas as pd
 from massive import RESTClient
 from finta import TA
 import time
-API_KEY = "im not giving u it"
-# SETUP
+API_KEY = ""
 client = RESTClient(API_KEY, pagination=True)
 finbert_base = pipeline("sentiment-analysis", model="ProsusAI/finbert", device=0, batch_size=128, truncation=True)
-finbert_tone = pipeline("sentiment-analysis", model="yiyanghkust/finbert-tone", device=0, batch_size=128, truncation=True)
+tone_tokenizer = BertTokenizer.from_pretrained("yiyanghkust/finbert-tone")
+tone_model = BertForSequenceClassification.from_pretrained("yiyanghkust/finbert-tone")
+finbert_tone = pipeline("sentiment-analysis", model=tone_model, tokenizer=tone_tokenizer, device=0, batch_size=128, truncation=True)
 models = [finbert_base, finbert_tone]
 
 
@@ -73,7 +74,8 @@ def get_candles(stock, client):
     df.index = df.index.ceil('1h')
     return df
 
-
+#gets the indicators from past years 
+#We dont use raw prices because it isnt useful we tell it proporitions
 def get_indicators(df):
 
 
@@ -126,7 +128,7 @@ def get_indicators(df):
 
     df["MACD"] = macd["MACD"]
     df["MACD_SIGNAL"] = macd["SIGNAL"]
-    df["MACD_HIST"] = macd["MACD"]
+    df["MACD_HIST"] = macd["MACD"] - macd["SIGNAL"]
     df["ADX_14"] = TA.ADX(df, period=14)
    
     sma20 = TA.SMA(df, period=20)
@@ -172,13 +174,14 @@ def ensemble_nlp(headlines):
         scores.append(score)
     return np.mean(np.array(scores), axis=0)
 
-
+#evaluates if the 
 def get_target_1h(df):
 
 
     df = df.sort_values(by=['Stock', 'Datetime'])
-    df['target_return_1h'] = df.groupby('Stock')['close'].pct_change(-1)
-    df['target_1h'] = (df['target_return_1h'] > 0.003).astype(int)
+    df['target_return_1h'] = df.groupby('Stock')['close'].pct_change(-1) * -1
+    df['target_1h'] = 0
+    df.loc[df['target_return_1h'] > 0.003, 'target_1h'] = 1
     df.loc[df['target_return_1h'] < -0.003, 'target_1h'] = -1
     return df
 
@@ -187,18 +190,16 @@ def get_target_1d(df):
 
 
     df = df.sort_values(by=['Stock', 'Datetime'])
-    df['target_return_1d'] = df.groupby('Stock')['close'].pct_change(-24)
-    df['target_1d'] = (df['target_return_1d'] > 0.007).astype(int)
+    df['target_return_1d'] = df.groupby('Stock')['close'].pct_change(-24) * -1
+    df['target_1d'] = 0
+    df.loc[df['target_return_1d'] > 0.007, 'target_1d'] = 1
+    df.loc[df['target_return_1d'] < -0.007, 'target_1d'] = -1
     return df
 
 
-# STOCKS
-stocks = [
-    "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA", "NFLX", "AMD", "INTC",
-    "AVGO", "ORCL", "CSCO", "ADBE", "CRM", "JPM", "BAC", "WFC", "V", "MA",
-    "UNH", "JNJ", "PFE", "WMT", "HD", "PG", "KO", "DIS", "XOM", "CVX",
-    "BA", "CAT", "GE", "NKE", "SBUX", "MCD", "T", "VZ", "COST", "TMUS"
-]
+
+stocks = ["AAPL", "MSFT", "NVDA", "TSLA", "AMD", "META", "AMZN", "GOOGL", "NFLX", "JPM"]
+
 
 
 
@@ -235,7 +236,7 @@ feature_cols = [
 
 all_data = []
 
-
+#we need to lag the price so the model cant cheat
 for stock in stocks:
     print(f"calculating {stock}")
 

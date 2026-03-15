@@ -1,7 +1,7 @@
 
 
 import os
-from transformers import pipeline
+from transformers import BertTokenizer, BertForSequenceClassification, pipeline
 import datetime
 import numpy as np
 import pandas as pd
@@ -10,14 +10,13 @@ from finta import TA
 import time
 
 
-
-
-API_KEY = "im not giving u it"
+API_KEY = "DiB3myZK1i2Zqw55XlvF6bng2AGedIQ8"
 client = RESTClient(API_KEY, pagination=True)
 
-
-finbert_base = pipeline("sentiment-analysis", model="ProsusAI/finbert", device=0, batch_size=64, truncation=True)                
-finbert_tone = pipeline("sentiment-analysis", model="yiyanghkust/finbert-tone", device=0, batch_size=64, truncation=True)
+finbert_base = pipeline("sentiment-analysis", model="ProsusAI/finbert", device=0, batch_size=64, truncation=True)
+tone_tokenizer = BertTokenizer.from_pretrained("yiyanghkust/finbert-tone")
+tone_model = BertForSequenceClassification.from_pretrained("yiyanghkust/finbert-tone")
+finbert_tone = pipeline("sentiment-analysis", model=tone_model, tokenizer=tone_tokenizer, device=0, batch_size=64, truncation=True)
 models = [finbert_base, finbert_tone]
 
 
@@ -27,8 +26,8 @@ def get_news(stock, client):
 
     for n in client.list_ticker_news(
         ticker=stock,
-        published_utc_gte="2024-02-13",
-        published_utc_lte="2026-02-13",
+        published_utc_gte="2021-03-13",
+        published_utc_lte="2026-03-13",
         order="asc",
         limit=1000
     ):
@@ -60,9 +59,9 @@ def get_candles(stock, client):
     for a in client.list_aggs(
         stock,
         1,
-        "day", # Fetches Daily Data
-        from_="2024-02-13",
-        to="2026-02-13",
+        "day", 
+        from_="2021-03-13",
+        to="2026-03-13",
         adjusted=True,
         sort="asc",
         limit=50000
@@ -98,9 +97,7 @@ def get_indicators(df):
    
     df["Williams_R"] = TA.WILLIAMS(df, period=14)
    
-    # FIX: STOCH returns a Series, not a DataFrame
     df["Stoch_K"] = TA.STOCH(df, period=14)
-    # FIX: STOCHD is a separate function
     df["Stoch_D"] = TA.STOCHD(df, period=14)
    
     df["CCI_20"] = TA.CCI(df, period=20)
@@ -132,7 +129,7 @@ def get_indicators(df):
     df["MACD"] = macd["MACD"]                
     df["MACD_SIGNAL"] = macd["SIGNAL"]                
    
-    df["MACD_HIST"] = macd["MACD"]
+    df["MACD_HIST"] = macd["MACD"] - macd["SIGNAL"]
    
     df["ADX_14"] = TA.ADX(df, period=14)
    
@@ -149,10 +146,9 @@ def get_indicators(df):
     df["SMA20_to_SMA50"] = sma20 / sma50
     df["SMA50_to_SMA200"] = sma50 / sma200
    
-    # RENAMED: 'h' to 'd' for daily data
     df["Return_1d"] = df["close"].pct_change(1)
-    df["Return_5d"] = df["close"].pct_change(5) # 1 week
-    df["Return_20d"] = df["close"].pct_change(20) # 1 month
+    df["Return_5d"] = df["close"].pct_change(5)
+    df["Return_20d"] = df["close"].pct_change(20) 
    
     df["DayOfWeek_Sin"] = np.sin(2 * np.pi * df.index.dayofweek / 7)
     df["DayOfWeek_Cos"] = np.cos(2 * np.pi * df.index.dayofweek / 7)
@@ -180,21 +176,16 @@ def get_target_1d(df):
     df = df.sort_values(by=['Stock', 'Datetime'])
 
 
-    df['target_return_1d'] = df.groupby('Stock')['close'].pct_change(-1)
+    df['target_return_1d'] = df.groupby('Stock')['close'].pct_change(-1) * -1
 
-
-    df['target_1d'] = (df['target_return_1d'] > 0.007).astype(int)
-    df['target_1d'] = (df['target_return_1d'] < 0.007).astype(int)
+    df['target_1d'] = 0
+    df.loc[df['target_return_1d'] > 0.007, 'target_1d'] = 1
+    df.loc[df['target_return_1d'] < -0.007, 'target_1d'] = -1
     return df
 
 
-# STOCKS
-stocks = [
-    "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA", "NFLX", "AMD", "INTC",
-    "AVGO", "ORCL", "CSCO", "ADBE", "CRM", "JPM", "BAC", "WFC", "V", "MA",
-    "UNH", "JNJ", "PFE", "WMT", "HD", "PG", "KO", "DIS", "XOM", "CVX",
-    "BA", "CAT", "GE", "NKE", "SBUX", "MCD", "T", "VZ", "COST", "TMUS"
-]
+stocks = ["AAPL", "MSFT", "NVDA", "TSLA", "AMD", "META", "AMZN", "GOOGL", "NFLX", "JPM"]
+
 
 
 
@@ -235,7 +226,7 @@ for stock in stocks:
         scores = ensemble_nlp(headlines)
         news_df["Scores"] = scores
         news_df = news_df.groupby([news_df.index, 'Stock']).agg({'Scores': 'mean'}).reset_index(level=1)
-       
+
         master_df = pd.merge(
             price_df_lagged.reset_index(),
             news_df.reset_index(),
@@ -244,6 +235,9 @@ for stock in stocks:
         )
         master_df = master_df.set_index('Datetime')
         master_df["Scores"] = master_df["Scores"].fillna(0)
+    else:
+        master_df = price_df_lagged.copy()
+        master_df["Scores"] = 0
     master_df = get_target_1d(master_df)
     master_df = master_df.dropna()
     all_data.append(master_df)
