@@ -8,19 +8,24 @@ from sklearn.inspection import permutation_importance
 from sklearn.utils.class_weight import compute_sample_weight
 
 feature_cols = [
-    'Stoch_D',
-    'MOM_10',
-    'SMA10_to_SMA20',
-    'MFI_14',
-    'Price_to_SMA50',
-    'High_Low_Pct',
-    'BB_Width',
-    'OBV_EMA',
-    'Price_to_SMA200',
-    'RSI_5',
-    'ROC_20',
-    'Return_1d',
-    'RSI_21'
+"Volatility_50", 
+    "ROC_10", 
+    "Volume_ROC", 
+    "Return_1d", 
+    "CCI_20", 
+    "High_Low_Pct", 
+    "MOM_5", 
+    "Price_to_SMA50", 
+    "SMA50_to_SMA200", 
+    "SMA20_to_SMA50",
+    "SMA10_to_SMA20",
+    "Volume_Ratio",
+    "DayOfWeek_Sin",
+    "ROC_5",
+    "MFI_14",
+    "Volatility_20",
+    "Price_to_SMA200",
+    "MACD_SIGNAL"
 ]
 #loads the data from fetcher
 print("data is loading")
@@ -30,8 +35,11 @@ df = df.sort_values("Datetime").reset_index(drop=True)
 
 #0 means hold because nothing huge happened
 df["target_1d"] = 0
-df.loc[df['target_return_1d'] > df['ATR_Pct'] * 1.5, "target_1d"] = 1
-df.loc[df['target_return_1d'] < -df['ATR_Pct'] * 1.5, "target_1d"] = -1
+df.loc[df['target_return_1d'] > df['ATR_Pct'] * 1.25, "target_1d"] = 1
+df.loc[df['target_return_1d'] < -df['ATR_Pct'] * 1.25, "target_1d"] = -1
+
+
+print(df["target_1d"].value_counts())
 
 split_date = df["Datetime"].quantile(0.8)
 train_df = df[df["Datetime"] < split_date].copy()
@@ -45,27 +53,26 @@ y_test = test_df["target_1d"].values
 scaler = StandardScaler()
 X_train = scaler.fit_transform(X_train)
 X_test = scaler.transform(X_test)
-sample_weights = compute_sample_weight('balanced', y_train)
+sample_weights = np.ones(len(y_train))
+#weights to tell model that some signals are stornger rather than ablanced
+sample_weights[y_train == 1] = 12
+sample_weights[y_train == -1] = 12
+sample_weights[y_train == 0] = 1
 
-
-
-print("TRAINING MODEL")
 model = HistGradientBoostingClassifier(
-    max_iter=3000,
-    max_depth=4,
-    learning_rate=0.01,
-    min_samples_leaf=150,
-    l2_regularization = 20,
-
+    max_iter=400,
+    learning_rate=0.015,
+    min_samples_leaf=25,
+    max_leaf_nodes=40,
+    l2_regularization=2,
     max_bins=255,
-    n_iter_no_change= 100,
+    n_iter_no_change=25,
     validation_fraction=0.1,
     random_state=42,
     verbose=1
 )
+
 model.fit(X_train, y_train, sample_weight=sample_weights)
-
-
 y_pred = model.predict(X_test)
 
 print(classification_report(y_test, y_pred))
