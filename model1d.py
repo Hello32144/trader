@@ -25,7 +25,8 @@ feature_cols = [
     "MFI_14",
     "Volatility_20",
     "Price_to_SMA200",
-    "MACD_SIGNAL"
+    "MACD_SIGNAL",
+    "Scores"
 ]
 #loads the data from fetcher
 print("data is loading")
@@ -35,8 +36,8 @@ df = df.sort_values("Datetime").reset_index(drop=True)
 
 #0 means hold because nothing huge happened
 df["target_1d"] = 0
-df.loc[df['target_return_1d'] > df['ATR_Pct'] * 1.25, "target_1d"] = 1
-df.loc[df['target_return_1d'] < -df['ATR_Pct'] * 1.25, "target_1d"] = -1
+df.loc[df['target_return_1d'] > 0.005, "target_1d"] = 1
+df.loc[df['target_return_1d'] < -0.005, "target_1d"] = -1
 
 
 print(df["target_1d"].value_counts())
@@ -53,11 +54,7 @@ y_test = test_df["target_1d"].values
 scaler = StandardScaler()
 X_train = scaler.fit_transform(X_train)
 X_test = scaler.transform(X_test)
-sample_weights = np.ones(len(y_train))
-#weights to tell model that some signals are stornger rather than ablanced
-sample_weights[y_train == 1] = 12
-sample_weights[y_train == -1] = 12
-sample_weights[y_train == 0] = 1
+sample_weights = compute_sample_weight('balanced', y_train)
 
 model = HistGradientBoostingClassifier(
     max_iter=400,
